@@ -43,25 +43,46 @@ def get_body():
 @app.route("/debug", methods=["POST", "GET"])
 def debug():
     """Endpoint de diagnostico para ver exactamente que recibe Vercel."""
+    import re
     raw_data = request.data
-    body_json = None
-    parse_error = None
+    raw_str = raw_data.decode("utf-8", errors="replace")
+
+    # Intentos de parseo
+    parse_native_error = None
+    parse_force_error = None
+    parse_raw_error = None
+    parse_cleaned_error = None
+
+    result_native = request.get_json(silent=True)
+    result_force = request.get_json(silent=True, force=True)
+
+    result_raw = None
     try:
-        body_json = json.loads(raw_data.decode("utf-8"))
+        result_raw = json.loads(raw_str)
     except Exception as e:
-        parse_error = str(e)
+        parse_raw_error = str(e)
+
+    cleaned = re.sub(r",\s*([\}\]])", r"\1", raw_str)
+    result_cleaned = None
+    try:
+        result_cleaned = json.loads(cleaned)
+    except Exception as e:
+        parse_cleaned_error = str(e)
+
+    parsed_by_get_body = get_body()
 
     return jsonify({
         "content_type": request.content_type,
-        "content_length": request.content_length,
         "raw_data_bytes": len(raw_data),
-        "raw_data_preview": raw_data.decode("utf-8", errors="replace")[:500],
-        "get_json_force": request.get_json(silent=True, force=True),
-        "get_json_native": request.get_json(silent=True),
-        "parsed_body": body_json,
-        "parse_error": parse_error,
-        "headers": dict(request.headers),
-        "method": request.method
+        "raw_data_preview": raw_str[:500],
+        "cleaned_preview": cleaned[:500],
+        "result_native": result_native,
+        "result_force": result_force,
+        "result_raw": result_raw,
+        "parse_raw_error": parse_raw_error,
+        "result_cleaned": result_cleaned,
+        "parse_cleaned_error": parse_cleaned_error,
+        "parsed_by_get_body": parsed_by_get_body
     })
 
 RESPONSE_EXITOSO = {
