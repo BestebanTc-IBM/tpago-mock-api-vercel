@@ -56,6 +56,41 @@ def ok(data):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+@app.post("/spy/consultar-cuenta-principal")
+def spy_consultar_cuenta_principal():
+    """Endpoint SPY: devuelve el raw body exacto que recibe sin procesar nada."""
+    raw = request.get_data(as_text=True)
+    return ok({
+        "spy": True,
+        "endpoint": "/consultar-cuenta-principal",
+        "content_type": request.content_type,
+        "content_length": request.content_length,
+        "raw_body": raw,
+        "raw_body_bytes": len(raw.encode("utf-8")),
+        "raw_repr": repr(raw),
+        "contains_type_0_with_space": '"type": "0"' in raw,
+        "contains_type_0_no_space": '"type":"0"' in raw,
+        "headers": {k: v for k, v in request.headers if k not in ("X-Vercel-Oidc-Token", "X-Vercel-Proxy-Signature")}
+    })
+
+
+@app.post("/spy/send-tpago")
+def spy_send_tpago():
+    """Endpoint SPY: devuelve el raw body exacto que recibe para send-tpago."""
+    raw = request.get_data(as_text=True)
+    body = parse_body()
+    return ok({
+        "spy": True,
+        "endpoint": "/send-tpago",
+        "content_type": request.content_type,
+        "raw_body": raw,
+        "raw_repr": repr(raw),
+        "parsed_TPayment": body.get("TPayment"),
+        "parsed_infoMsg": body.get("infoMsg"),
+        "headers": {k: v for k, v in request.headers if k not in ("X-Vercel-Oidc-Token", "X-Vercel-Proxy-Signature")}
+    })
+
+
 @app.post("/consultar-cuenta-principal")
 def consultar_cuenta_principal():
     # El banco hace comparacion de string exacto en el raw body.
