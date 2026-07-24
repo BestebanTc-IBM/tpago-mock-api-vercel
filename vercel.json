@@ -7,10 +7,6 @@
     }
   ],
   "routes": [
-    { "src": "/consultar-cuenta-principal", "dest": "/index.py" },
-    { "src": "/conversation-starter", "dest": "/index.py" },
-    { "src": "/consult-affiliates", "dest": "/index.py" },
-    { "src": "/send-tpago", "dest": "/index.py" },
-    { "src": "/debug", "dest": "/index.py" }
+    { "src": "/(.*)", "dest": "/index.py" }
   ]
 }
