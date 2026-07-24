@@ -1,271 +1,156 @@
-from flask import Flask, request, jsonify
 import json
+import re
 
-app = Flask(__name__)
 
-# Forzar que Flask trate text/plain como application/json
-app.config["PROPAGATE_EXCEPTIONS"] = True
-
-@app.before_request
-def force_json_content_type():
-    """
-    Si el Content-Type es text/plain pero el body parece JSON,
-    sobreescribir el Content-Type para que Flask lo procese como JSON.
-    """
-    if request.content_type and "text/plain" in request.content_type:
-        request.environ["CONTENT_TYPE"] = "application/json"
-
-def get_body():
-    """
-    Parsea el body JSON de forma robusta.
-    before_request ya convirtio text/plain a application/json,
-    por lo que get_json() nativo deberia funcionar.
-    Mantiene fallbacks por seguridad.
-    """
-    import re
-
-    # Intento 1: nativo — funciona despues del before_request
+def clean_and_parse(raw):
+    if not raw:
+        return {}
+    text = raw.strip()
+    text = re.sub(r"^json\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r",\s*([\}\]])", r"\1", text)
     try:
-        data = request.get_json(silent=True)
-        if data is not None:
-            return data
+        return json.loads(text)
     except Exception:
-        pass
-
-    # Intento 2: force=True
-    try:
-        data = request.get_json(silent=True, force=True)
-        if data is not None:
-            return data
-    except Exception:
-        pass
-
-    # Intento 3: raw con limpieza de trailing commas
-    try:
-        raw = request.get_data(as_text=True, cache=True).strip()
-        if raw:
-            clean = re.sub(r",\s*([\}\]])", r"\1", raw)
-            return json.loads(clean)
-    except Exception:
-        pass
-
-    return {}
+        return {}
 
 
-@app.route("/debug", methods=["POST", "GET"])
-def debug():
-    """Endpoint de diagnostico para ver exactamente que recibe Vercel."""
-    import re
-    raw_data = request.data
-    raw_str = raw_data.decode("utf-8", errors="replace")
-
-    # Intentos de parseo
-    parse_native_error = None
-    parse_force_error = None
-    parse_raw_error = None
-    parse_cleaned_error = None
-
-    result_native = request.get_json(silent=True)
-    result_force = request.get_json(silent=True, force=True)
-
-    result_raw = None
-    try:
-        result_raw = json.loads(raw_str)
-    except Exception as e:
-        parse_raw_error = str(e)
-
-    cleaned = re.sub(r",\s*([\}\]])", r"\1", raw_str)
-    result_cleaned = None
-    try:
-        result_cleaned = json.loads(cleaned)
-    except Exception as e:
-        parse_cleaned_error = str(e)
-
-    parsed_by_get_body = get_body()
-
-    return jsonify({
-        "content_type": request.content_type,
-        "raw_data_bytes": len(raw_data),
-        "raw_data_preview": raw_str[:500],
-        "cleaned_preview": cleaned[:500],
-        "result_native": result_native,
-        "result_force": result_force,
-        "result_raw": result_raw,
-        "parse_raw_error": parse_raw_error,
-        "result_cleaned": result_cleaned,
-        "parse_cleaned_error": parse_cleaned_error,
-        "parsed_by_get_body": parsed_by_get_body
-    })
-
-RESPONSE_EXITOSO = {
-    "processingDate": "2024-10-30 09:35:59 VET",
-    "infoMsg": {
-        "guId": "586f1cfc-4f33-4766-90f5-2c453e3b1fdd",
-        "channel": "017",
-        "subchannel": "01",
-        "applId": "AVB",
-        "applVersion": "0.0",
-        "personId": "0000476138",
-        "tarj_or_user": "jperez",
-        "token": "",
-        "action": "ListaProductos"
-    },
-    "code": 0,
-    "message": "TRANSACCION EXITOSA",
-    "productList": [
-        {
-            "productNumber": 1050136961136063536,
-            "productTypeCode": "CTCTE",
-            "productName": "CUENTA CORRIENTE B.M.",
-            "relatedCompanyCode": "BM001",
-            "currentBalance": 999999999.00
-        }
-    ]
-}
-
-RESPONSE_ERROR = {
-    "processingDate": "2024-10-30 09:39:58 VET",
-    "infoMsg": {
-        "guId": "0b40925b-892d-486e-b1a4-9b6f4ae852eb",
-        "channel": "017",
-        "subchannel": "01",
-        "applId": "AVB",
-        "applVersion": "0.0",
-        "personId": "8187796",
-        "userId": "6820968",
-        "token": "",
-        "action": "ListaProductos"
-    },
-    "code": 50,
-    "message": "NO SE TIENE INFORMACION REGISTRADA."
-}
-
-@app.route("/consultar-cuenta-principal", methods=["POST"])
-def consultar_cuenta_principal():
-    import re
-    body = get_body()
-    type_val = body.get("type")
-
-    # --- MODO DEBUG TEMPORAL: incluir diagnostico en la respuesta ---
-    debug_info = {
-        "type_val_recibido": type_val,
-        "type_val_type": str(type(type_val)),
-        "body_completo": body,
-        "es_igual_a_0": type_val == "0",
-        "get_data_raw": request.get_data(as_text=True, cache=True)[:200],
-        "get_json_force": request.get_json(silent=True, force=True),
+def make_json_response(data, status=200):
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(data)
     }
 
-    if type_val == "0":
-        resp = dict(RESPONSE_EXITOSO)
-        resp["_debug"] = debug_info
-        return jsonify(resp)
 
-    resp = dict(RESPONSE_ERROR)
-    resp["_debug"] = debug_info
-    return jsonify(resp)
+def handler(request):
+    path  = request.path
+    method = request.method.upper()
 
-@app.route("/conversation-starter", methods=["POST"])
-def conversation_starter():
-    return jsonify({
-        "processingDate": "2024-10-21 15:48:58 VET",
-        "infoMsg": {
-            "guId": "d86e6eb7-efbf-4f8c-ad76-e36df5e13a3d",
-            "channel": "017",
-            "subchannel": "01",
-            "applId": "AVB",
-            "applVersion": "0.0",
-            "personId": "0006486342",
-            "userId": "servermia",
-            "token": "",
-            "action": "InicioConversacion"
-        },
-        "code": 0,
-        "clientName": "PRUEBAS QA",
-        "clientLastName": "CALIDAD QA",
-        "personId": 6486342,
-        "emailPersonal": "6054.BANCOMERCANTIL@GMAIL.COM",
-        "celCodNumber": "414",
-        "celNumber": 4234253,
-        "birthDate": "22/03/1980",
-        "birthDay": False
-    })
+    # Leer body crudo una sola vez
+    try:
+        raw = request.body.decode("utf-8") if isinstance(request.body, bytes) else str(request.body or "")
+    except Exception:
+        raw = ""
 
-@app.route("/consult-affiliates", methods=["POST"])
-def consult_affiliates():
-    return jsonify({
-        "processingDate": "2026-05-05 15:32:29 VET",
-        "infoMsg": {
-            "guId": "586f1cfc-4f33-4766-90f5-2c453e3b1fdd",
-            "channel": "017",
-            "subchannel": "01",
-            "applId": "AVB",
-            "applVersion": "0.0",
-            "personId": "0000476138",
-            "tarjOrUser": "jperez",
-            "token": "",
-            "action": "ConsultaAfiliacionesMIA"
-        },
-        "code": 0,
-        "groupCode": 0,
-        "consultedRecords": 1,
-        "consultExtended": [
-            {
+    body = clean_and_parse(raw)
+
+    # ── /consultar-cuenta-principal ──────────────────────────────
+    if path == "/consultar-cuenta-principal" and method == "POST":
+        if body.get("type") == "0":
+            return make_json_response({
+                "processingDate": "2024-10-30 09:35:59 VET",
+                "infoMsg": {
+                    "guId": "586f1cfc-4f33-4766-90f5-2c453e3b1fdd",
+                    "channel": "017", "subchannel": "01", "applId": "AVB",
+                    "applVersion": "0.0", "personId": "0000476138",
+                    "tarj_or_user": "jperez", "token": "", "action": "ListaProductos"
+                },
+                "code": 0,
+                "message": "TRANSACCION EXITOSA",
+                "productList": [{
+                    "productNumber": 1050136961136063536,
+                    "productTypeCode": "CTCTE",
+                    "productName": "CUENTA CORRIENTE B.M.",
+                    "relatedCompanyCode": "BM001",
+                    "currentBalance": 999999999.00
+                }]
+            })
+        return make_json_response({
+            "processingDate": "2024-10-30 09:39:58 VET",
+            "infoMsg": {
+                "guId": "0b40925b-892d-486e-b1a4-9b6f4ae852eb",
+                "channel": "017", "subchannel": "01", "applId": "AVB",
+                "applVersion": "0.0", "personId": "8187796",
+                "userId": "6820968", "token": "", "action": "ListaProductos"
+            },
+            "code": 50,
+            "message": "NO SE TIENE INFORMACION REGISTRADA."
+        })
+
+    # ── /conversation-starter ────────────────────────────────────
+    if path == "/conversation-starter" and method == "POST":
+        return make_json_response({
+            "processingDate": "2024-10-21 15:48:58 VET",
+            "infoMsg": {
+                "guId": "d86e6eb7-efbf-4f8c-ad76-e36df5e13a3d",
+                "channel": "017", "subchannel": "01", "applId": "AVB",
+                "applVersion": "0.0", "personId": "0006486342",
+                "userId": "servermia", "token": "", "action": "InicioConversacion"
+            },
+            "code": 0,
+            "clientName": "PRUEBAS QA",
+            "clientLastName": "CALIDAD QA",
+            "personId": 6486342,
+            "emailPersonal": "6054.BANCOMERCANTIL@GMAIL.COM",
+            "celCodNumber": "414",
+            "celNumber": 4234253,
+            "birthDate": "22/03/1980",
+            "birthDay": False
+        })
+
+    # ── /consult-affiliates ──────────────────────────────────────
+    if path == "/consult-affiliates" and method == "POST":
+        return make_json_response({
+            "processingDate": "2026-05-05 15:32:29 VET",
+            "infoMsg": {
+                "guId": "586f1cfc-4f33-4766-90f5-2c453e3b1fdd",
+                "channel": "017", "subchannel": "01", "applId": "AVB",
+                "applVersion": "0.0", "personId": "0000476138",
+                "tarjOrUser": "jperez", "token": "", "action": "ConsultaAfiliacionesMIA"
+            },
+            "code": 0,
+            "groupCode": 0,
+            "consultedRecords": 1,
+            "consultExtended": [{
                 "beneficiaryIdentificationType": "V",
                 "beneficiaryIdentificationNumber": 11488316,
-                "consecutive": "0",
-                "channelCode": "6",
-                "bankCode": 108,
-                "CodPhone": 412,
-                "NumPhone": 9051111,
-                "Alias": "Jesus"
-            }
-        ]
-    })
+                "consecutive": "0", "channelCode": "6",
+                "bankCode": 108, "CodPhone": 412,
+                "NumPhone": 9051111, "Alias": "Jesus"
+            }]
+        })
 
-@app.route("/send-tpago", methods=["POST"])
-def send_tpago():
-    body = get_body()
-    tpayment = body.get("TPayment", {})
-
-    REQUIRED_TPAYMENT_FIELDS = [
-        "transactionAmount", "accountNumberOrigin",
-        "destinationIdentificationNumber", "destinationPhoneNumber"
-    ]
-    missing = [f for f in REQUIRED_TPAYMENT_FIELDS if not tpayment.get(f)]
-
-    if missing:
-        return jsonify({
+    # ── /send-tpago ──────────────────────────────────────────────
+    if path == "/send-tpago" and method == "POST":
+        tpayment = body.get("TPayment", {})
+        required = ["transactionAmount", "accountNumberOrigin",
+                    "destinationIdentificationNumber", "destinationPhoneNumber"]
+        missing = [f for f in required if not tpayment.get(f)]
+        if missing:
+            return make_json_response({
+                "processingDate": "2026-04-29 12:09:58 VET",
+                "infoMsg": {"action": "EnvioTpagoMia"},
+                "code": 9999,
+                "message": "Error en los datos",
+                "missing_fields": missing
+            })
+        return make_json_response({
             "processingDate": "2026-04-29 12:09:58 VET",
-            "infoMsg": {"action": "EnvioTpagoMia"},
-            "code": 9999,
-            "message": "Error en los datos",
-            "debug": {
-                "campos_faltantes_en_TPayment": missing
-            }
-        }), 200
+            "infoMsg": {
+                "guId": "90f0ce2a-5d5f-4fd7-b0dc-1e1d71e5aa8d",
+                "channel": "017", "subchannel": "01", "applId": "AVB",
+                "applVersion": "1.0", "personId": "0000476138",
+                "userId": "18234394", "token": "", "action": "EnvioTpagoMia"
+            },
+            "code": 0,
+            "confirmationNumber": 48310026919,
+            "fee": 0.13,
+            "transactionDate": "2026-04-29T12:09:58.157",
+            "transactionTime": "2026-04-29T12:09:58.157",
+            "operationPassword": 26919,
+            "simf": False,
+            "codeF": 0
+        })
 
-    return jsonify({
-        "processingDate": "2026-04-29 12:09:58 VET",
-        "infoMsg": {
-            "guId": "90f0ce2a-5d5f-4fd7-b0dc-1e1d71e5aa8d",
-            "channel": "017",
-            "subchannel": "01",
-            "applId": "AVB",
-            "applVersion": "1.0",
-            "personId": "0000476138",
-            "userId": "18234394",
-            "token": "",
-            "action": "EnvioTpagoMia"
-        },
-        "code": 0,
-        "confirmationNumber": 48310026919,
-        "fee": 0.13,
-        "transactionDate": "2026-04-29T12:09:58.157",
-        "transactionTime": "2026-04-29T12:09:58.157",
-        "operationPassword": 26919,
-        "simf": False,
-        "codeF": 0
-    })
+    # ── /debug ───────────────────────────────────────────────────
+    if path == "/debug":
+        return make_json_response({
+            "path": path,
+            "method": method,
+            "raw_preview": raw[:300],
+            "parsed_body": body,
+            "type_val": body.get("type"),
+            "es_igual_a_0": body.get("type") == "0"
+        })
 
-handler = app
+    return make_json_response({"error": "Not found", "path": path}, 404)
