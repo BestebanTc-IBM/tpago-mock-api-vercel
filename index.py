@@ -5,16 +5,53 @@ app = Flask(__name__)
 
 def get_body():
     """Parsea el body JSON de forma robusta independientemente del Content-Type."""
-    data = request.get_json(silent=True, force=True)
-    if data is not None:
-        return data
+    # Intento 1: force=True ignora Content-Type
+    try:
+        data = request.get_json(silent=False, force=True)
+        if data is not None:
+            return data
+    except Exception:
+        pass
+    # Intento 2: raw bytes
     try:
         raw = request.data.decode("utf-8").strip()
         if raw:
             return json.loads(raw)
     except Exception:
         pass
+    # Intento 3: stream
+    try:
+        raw = request.stream.read().decode("utf-8").strip()
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
     return {}
+
+
+@app.route("/debug", methods=["POST", "GET"])
+def debug():
+    """Endpoint de diagnostico para ver exactamente que recibe Vercel."""
+    raw_data = request.data
+    body_json = None
+    parse_error = None
+    try:
+        body_json = json.loads(raw_data.decode("utf-8"))
+    except Exception as e:
+        parse_error = str(e)
+
+    return jsonify({
+        "content_type": request.content_type,
+        "content_length": request.content_length,
+        "raw_data_bytes": len(raw_data),
+        "raw_data_preview": raw_data.decode("utf-8", errors="replace")[:500],
+        "get_json_force": request.get_json(silent=True, force=True),
+        "get_json_native": request.get_json(silent=True),
+        "parsed_body": body_json,
+        "parse_error": parse_error,
+        "headers": dict(request.headers),
+        "method": request.method
+    })
 
 RESPONSE_EXITOSO = {
     "processingDate": "2024-10-30 09:35:59 VET",
