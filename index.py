@@ -6,21 +6,48 @@ app = Flask(__name__)
 
 
 def parse_body():
-    """Lee el body crudo y parsea JSON sin importar Content-Type."""
+    """
+    Lee el body crudo y extrae campos JSON sin importar el formato.
+    Acepta: JSON valido, JSON con trailing commas, texto plano con pares key:value,
+    fragmentos como '"type": "0"' sin llaves, prefijo 'json' de Postman.
+    """
     try:
         raw = request.get_data(as_text=True).strip()
     except Exception:
         return {}
     if not raw:
         return {}
-    # Quitar prefijo "json" que Postman agrega en modo Text
+
+    # Quitar prefijo "json" de Postman en modo Text
     raw = re.sub(r"^json\s*", "", raw, flags=re.IGNORECASE).strip()
-    # Quitar trailing commas
-    raw = re.sub(r",\s*([\}\]])", r"\1", raw)
+
+    # Quitar trailing commas antes de parsear
+    cleaned = re.sub(r",\s*([\}\]])", r"\1", raw)
+
+    # Intento 1: JSON valido normal
     try:
-        return json.loads(raw)
+        return json.loads(cleaned)
     except Exception:
-        return {}
+        pass
+
+    # Intento 2: el body no tiene llaves — envolverlo en {} y parsear
+    # Ejemplo: '"type": "0"' -> '{"type": "0"}'
+    try:
+        wrapped = "{" + cleaned.strip().strip(",") + "}"
+        return json.loads(wrapped)
+    except Exception:
+        pass
+
+    # Intento 3: extraccion por regex de pares "key": "value" o "key": number/bool
+    result = {}
+    for match in re.finditer(r'"([^"]+)"\s*:\s*("(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?|true|false|null)', raw):
+        key = match.group(1)
+        val_str = match.group(2)
+        try:
+            result[key] = json.loads(val_str)
+        except Exception:
+            result[key] = val_str
+    return result
 
 
 def ok(data):
@@ -31,8 +58,11 @@ def ok(data):
 
 @app.post("/consultar-cuenta-principal")
 def consultar_cuenta_principal():
-    body = parse_body()
-    if body.get("type") == "0":
+    # El banco hace comparacion de string exacto en el raw body.
+    # "type": "0"  (con espacio) → exitoso
+    # "type":"0"   (sin espacio) → error
+    raw = request.get_data(as_text=True)
+    if '"type": "0"' in raw:
         return ok({
             "processingDate": "2024-10-30 09:35:59 VET",
             "infoMsg": {
