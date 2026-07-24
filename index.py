@@ -5,35 +5,26 @@ app = Flask(__name__)
 
 def get_body():
     """
-    Parsea el body JSON de forma robusta.
-    Maneja: Content-Type text/plain, JSON con trailing commas, whitespace extra.
+    Parsea el body JSON de forma robusta para Vercel Python functions.
+    Usa get_data(as_text=True) que fuerza la lectura del stream completo.
     """
     import re
 
-    raw = ""
-
-    # Leer raw bytes primero (funciona con cualquier Content-Type)
+    # get_data(as_text=True, cache=True) fuerza lectura completa del stream en Vercel
     try:
-        raw = request.data.decode("utf-8").strip()
+        raw = request.get_data(as_text=True, cache=True).strip()
+        if raw:
+            # Limpiar trailing commas: {"type": "0",} -> {"type": "0"}
+            clean = re.sub(r",\s*([\}\]])", r"\1", raw)
+            return json.loads(clean)
     except Exception:
         pass
 
-    # Si no hay datos en request.data intentar con get_json force
-    if not raw:
-        try:
-            data = request.get_json(silent=True, force=True)
-            if data is not None:
-                return data
-        except Exception:
-            pass
-        return {}
-
-    # Limpiar trailing commas antes de parsear (JSON invalido comun)
-    # Ejemplo: {"type": "0",} o {"a": 1, "b": 2,}
-    clean = re.sub(r",\s*([\}\]])", r"\1", raw)
-
+    # Fallback: force=True ignora Content-Type
     try:
-        return json.loads(clean)
+        data = request.get_json(silent=True, force=True)
+        if data is not None:
+            return data
     except Exception:
         pass
 
