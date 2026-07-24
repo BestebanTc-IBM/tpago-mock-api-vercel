@@ -1,6 +1,20 @@
 from flask import Flask, request, jsonify
+import json
 
 app = Flask(__name__)
+
+def get_body():
+    """Parsea el body JSON de forma robusta independientemente del Content-Type."""
+    data = request.get_json(silent=True, force=True)
+    if data is not None:
+        return data
+    try:
+        raw = request.data.decode("utf-8").strip()
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return {}
 
 RESPONSE_EXITOSO = {
     "processingDate": "2024-10-30 09:35:59 VET",
@@ -49,7 +63,7 @@ RESPONSE_ERROR = {
 def consultar_cuenta_principal():
     # La unica condicion para retornar exitoso es que type sea exactamente el string "0"
     # Cualquier otro valor (None, "", "01", "10", 0 entero, sin body) retorna code 50
-    body = request.get_json(silent=True) or {}
+    body = get_body()
     type_val = body.get("type")
 
     if type_val == "0":
@@ -116,7 +130,7 @@ def consult_affiliates():
 
 @app.route("/send-tpago", methods=["POST"])
 def send_tpago():
-    body = request.get_json(silent=True) or {}
+    body = get_body()
     tpayment = body.get("TPayment", {})
 
     REQUIRED_TPAYMENT_FIELDS = [
