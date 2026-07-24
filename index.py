@@ -56,35 +56,59 @@ def ok(data):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+import base64
+
 @app.post("/spy/consultar-cuenta-principal")
 def spy_consultar_cuenta_principal():
-    """Endpoint SPY: devuelve el raw body exacto que recibe sin procesar nada."""
-    raw = request.get_data(as_text=True)
+    """Endpoint SPY: devuelve el raw body exacto con analisis forense de bytes."""
+    raw_bytes = request.get_data()
+    raw_str = raw_bytes.decode("utf-8", errors="replace")
+    b64 = base64.b64encode(raw_bytes).decode("ascii")
+    hex_bytes = raw_bytes.hex()
+
+    # Analisis caracter por caracter
+    char_analysis = []
+    for i, b in enumerate(raw_bytes):
+        char_analysis.append({
+            "pos": i,
+            "byte": b,
+            "hex": format(b, "02x"),
+            "char": chr(b) if 32 <= b < 127 else f"<{b}>"
+        })
+
     return ok({
         "spy": True,
         "endpoint": "/consultar-cuenta-principal",
         "content_type": request.content_type,
         "content_length": request.content_length,
-        "raw_body": raw,
-        "raw_body_bytes": len(raw.encode("utf-8")),
-        "raw_repr": repr(raw),
-        "contains_type_0_with_space": '"type": "0"' in raw,
-        "contains_type_0_no_space": '"type":"0"' in raw,
+        "raw_body_string": raw_str,
+        "raw_body_base64": b64,
+        "raw_body_hex": hex_bytes,
+        "raw_body_bytes_count": len(raw_bytes),
+        "char_by_char": char_analysis,
+        "contains_type_0_with_space": b'"type": "0"' in raw_bytes,
+        "contains_type_0_no_space": b'"type":"0"' in raw_bytes,
+        "contains_backslash": b'\\' in raw_bytes,
         "headers": {k: v for k, v in request.headers if k not in ("X-Vercel-Oidc-Token", "X-Vercel-Proxy-Signature")}
     })
 
 
 @app.post("/spy/send-tpago")
 def spy_send_tpago():
-    """Endpoint SPY: devuelve el raw body exacto que recibe para send-tpago."""
-    raw = request.get_data(as_text=True)
+    """Endpoint SPY: devuelve el raw body exacto para send-tpago."""
+    raw_bytes = request.get_data()
+    raw_str = raw_bytes.decode("utf-8", errors="replace")
+    b64 = base64.b64encode(raw_bytes).decode("ascii")
     body = parse_body()
     return ok({
         "spy": True,
         "endpoint": "/send-tpago",
         "content_type": request.content_type,
-        "raw_body": raw,
-        "raw_repr": repr(raw),
+        "raw_body_string": raw_str,
+        "raw_body_base64": b64,
+        "raw_body_hex": raw_bytes.hex(),
+        "raw_body_bytes_count": len(raw_bytes),
+        "contains_backslash": b'\\' in raw_bytes,
         "parsed_TPayment": body.get("TPayment"),
         "parsed_infoMsg": body.get("infoMsg"),
         "headers": {k: v for k, v in request.headers if k not in ("X-Vercel-Oidc-Token", "X-Vercel-Proxy-Signature")}
@@ -93,11 +117,13 @@ def spy_send_tpago():
 
 @app.post("/consultar-cuenta-principal")
 def consultar_cuenta_principal():
-    # El banco hace comparacion de string exacto en el raw body.
-    # "type": "0"  (con espacio) → exitoso
-    # "type":"0"   (sin espacio) → error
+    # Orchestrate manda: {"type":"0"} sin espacio
+    # El banco real requiere: "type": "0" con espacio
+    # Nuestra API acepta ambos para que el agente funcione
     raw = request.get_data(as_text=True)
-    if '"type": "0"' in raw:
+    body = parse_body()
+    type_val = body.get("type")
+    if type_val == "0":
         return ok({
             "processingDate": "2024-10-30 09:35:59 VET",
             "infoMsg": {
