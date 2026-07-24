@@ -3,28 +3,49 @@ import json
 
 app = Flask(__name__)
 
+# Forzar que Flask trate text/plain como application/json
+app.config["PROPAGATE_EXCEPTIONS"] = True
+
+@app.before_request
+def force_json_content_type():
+    """
+    Si el Content-Type es text/plain pero el body parece JSON,
+    sobreescribir el Content-Type para que Flask lo procese como JSON.
+    """
+    if request.content_type and "text/plain" in request.content_type:
+        request.environ["CONTENT_TYPE"] = "application/json"
+
 def get_body():
     """
-    Parsea el body JSON de forma robusta para Vercel Python functions.
-    Usa get_data(as_text=True) que fuerza la lectura del stream completo.
+    Parsea el body JSON de forma robusta.
+    before_request ya convirtio text/plain a application/json,
+    por lo que get_json() nativo deberia funcionar.
+    Mantiene fallbacks por seguridad.
     """
     import re
 
-    # get_data(as_text=True, cache=True) fuerza lectura completa del stream en Vercel
+    # Intento 1: nativo — funciona despues del before_request
     try:
-        raw = request.get_data(as_text=True, cache=True).strip()
-        if raw:
-            # Limpiar trailing commas: {"type": "0",} -> {"type": "0"}
-            clean = re.sub(r",\s*([\}\]])", r"\1", raw)
-            return json.loads(clean)
+        data = request.get_json(silent=True)
+        if data is not None:
+            return data
     except Exception:
         pass
 
-    # Fallback: force=True ignora Content-Type
+    # Intento 2: force=True
     try:
         data = request.get_json(silent=True, force=True)
         if data is not None:
             return data
+    except Exception:
+        pass
+
+    # Intento 3: raw con limpieza de trailing commas
+    try:
+        raw = request.get_data(as_text=True, cache=True).strip()
+        if raw:
+            clean = re.sub(r",\s*([\}\]])", r"\1", raw)
+            return json.loads(clean)
     except Exception:
         pass
 
@@ -121,14 +142,28 @@ RESPONSE_ERROR = {
 
 @app.route("/consultar-cuenta-principal", methods=["POST"])
 def consultar_cuenta_principal():
-    # La unica condicion para retornar exitoso es que type sea exactamente el string "0"
-    # Cualquier otro valor (None, "", "01", "10", 0 entero, sin body) retorna code 50
+    import re
     body = get_body()
     type_val = body.get("type")
 
+    # --- MODO DEBUG TEMPORAL: incluir diagnostico en la respuesta ---
+    debug_info = {
+        "type_val_recibido": type_val,
+        "type_val_type": str(type(type_val)),
+        "body_completo": body,
+        "es_igual_a_0": type_val == "0",
+        "get_data_raw": request.get_data(as_text=True, cache=True)[:200],
+        "get_json_force": request.get_json(silent=True, force=True),
+    }
+
     if type_val == "0":
-        return jsonify(RESPONSE_EXITOSO)
-    return jsonify(RESPONSE_ERROR)
+        resp = dict(RESPONSE_EXITOSO)
+        resp["_debug"] = debug_info
+        return jsonify(resp)
+
+    resp = dict(RESPONSE_ERROR)
+    resp["_debug"] = debug_info
+    return jsonify(resp)
 
 @app.route("/conversation-starter", methods=["POST"])
 def conversation_starter():
