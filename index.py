@@ -117,13 +117,11 @@ def spy_send_tpago():
 
 @app.post("/consultar-cuenta-principal")
 def consultar_cuenta_principal():
-    # Orchestrate manda: {"type":"0"} sin espacio
-    # El banco real requiere: "type": "0" con espacio
-    # Nuestra API acepta ambos para que el agente funcione
+    # Replica exacta del banco Smockin:
+    # busqueda de substring literal en el raw body.
+    # El string "type": "0" (con espacio despues de :) debe estar presente.
     raw = request.get_data(as_text=True)
-    body = parse_body()
-    type_val = body.get("type")
-    if type_val == "0":
+    if '"type": "0"' in raw:
         return ok({
             "processingDate": "2024-10-30 09:35:59 VET",
             "infoMsg": {
